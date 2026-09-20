@@ -6,6 +6,7 @@
 #include <pietendo/hac/AesKeygen.h>
 #include <pietendo/hac/HierarchicalSha256Stream.h>
 #include <pietendo/hac/HierarchicalIntegrityStream.h>
+#include <pietendo/hac/CompressedStorage.h>
 #include <pietendo/hac/BKTREncryptedStream.h>
 #include <pietendo/hac/PartitionFsSnapshotGenerator.h>
 #include <pietendo/hac/RomFsSnapshotGenerator.h>
@@ -392,6 +393,15 @@ void nstool::NcaProcess::generatePartitionConfiguration()
 				break;
 			default:
 				throw tc::Exception(mModuleName, fmt::format("HashType({:s}): UNKNOWN", pie::hac::ContentArchiveUtil::getHashTypeAsString(info.hash_type)));
+			}
+
+			// apply the compression layer (CompressionInfo) if present.
+			// The compression info offsets are relative to the (hash-verified) section data stream,
+			// so this must be applied after the hash layer processing.
+			const pie::hac::sContentArchiveBucketInfo& compression_info = fs_header.compression_info.bucket;
+			if (compression_info.offset.unwrap() != 0 && compression_info.size.unwrap() != 0)
+			{
+				info.reader = std::make_shared<pie::hac::CompressedStorage>(pie::hac::CompressedStorage(info.reader, compression_info.offset.unwrap(), compression_info.size.unwrap(), compression_info.header.entry_count.unwrap()));
 			}
 
 			// filter out unrecognised format types

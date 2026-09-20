@@ -30,12 +30,15 @@ jobs:
            arch: arm64
            bin_ext: 
     steps:
-    - uses: actions/checkout@v4
-    - name: Clone submodules
-      run: git submodule init && git submodule update
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: Apply libpietendo patch
+      working-directory: deps/libpietendo
+      run: git apply --ignore-whitespace ../libpietendo.patch
     - name: Compile ${{ matrix.prog }}
       run: make PROJECT_PLATFORM_ARCH=${{ matrix.arch }} deps all
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.prog }}-${{ matrix.dist }}
         path: ./bin/${{ matrix.prog }}${{ matrix.bin_ext }}
@@ -60,14 +63,17 @@ jobs:
            build_path: Release
            bin_ext: .exe
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: Apply libpietendo patch
+      working-directory: deps/libpietendo
+      run: git apply --ignore-whitespace ../libpietendo.patch
     - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v1.3
-    - name: Clone submodules
-      run: git submodule init && git submodule update
+      uses: microsoft/setup-msbuild@v3
     - name: Compile ${{ matrix.prog }}
       run: msbuild .\build\visualstudio\${{ matrix.prog }}.sln /p:configuration=${{ matrix.configuration }} /p:platform=${{ matrix.platform }} 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.prog }}-${{ matrix.dist }}
         path: .\build\visualstudio\${{ matrix.build_path }}\${{ matrix.prog }}${{ matrix.bin_ext }}
