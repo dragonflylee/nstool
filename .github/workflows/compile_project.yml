@@ -14,21 +14,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        dist: [ubuntu_x86_64, macos_x86_64, macos_arm64]
+        dist: [ubuntu_x86_64, ubuntu_arm64, macos_x86_64, macos_arm64]
         prog: [nstool]
         include:
          - dist: ubuntu_x86_64
-           os: ubuntu-latest
+           os: ubuntu-24.04
            arch: x86_64
-           bin_ext: 
+         - dist: ubuntu_arm64
+           os: ubuntu-24.04-arm
+           arch: arm64
          - dist: macos_x86_64
            os: macos-latest
            arch: x86_64
-           bin_ext: 
          - dist: macos_arm64
            os: macos-latest
            arch: arm64
-           bin_ext: 
     steps:
     - uses: actions/checkout@v7
       with:
@@ -36,12 +36,15 @@ jobs:
     - name: Apply libpietendo patch
       working-directory: deps/libpietendo
       run: git apply --ignore-whitespace ../libpietendo.patch
+    - name: Apply libtoolchain patch
+      working-directory: deps/libtoolchain
+      run: git apply --ignore-whitespace ../libtoolchain.patch
     - name: Compile ${{ matrix.prog }}
       run: make PROJECT_PLATFORM_ARCH=${{ matrix.arch }} deps all
     - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.prog }}-${{ matrix.dist }}
-        path: ./bin/${{ matrix.prog }}${{ matrix.bin_ext }}
+        path: ./bin/${{ matrix.prog }}
   build_visualstudio:
     name: Compile ${{ matrix.prog }} for ${{ matrix.dist }}
     runs-on: ${{ matrix.os }}
