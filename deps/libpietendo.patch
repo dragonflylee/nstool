@@ -1,5 +1,5 @@
 diff --git a/build/visualstudio/libpietendo/libpietendo.vcxproj b/build/visualstudio/libpietendo/libpietendo.vcxproj
-index 61916ae..e3d09e5 100644
+index 61916ae701..e3d09e571a 100644
 --- a/build/visualstudio/libpietendo/libpietendo.vcxproj
 +++ b/build/visualstudio/libpietendo/libpietendo.vcxproj
 @@ -190,6 +190,7 @@
@@ -20,7 +20,7 @@ index 61916ae..e3d09e5 100644
      <ClCompile Include="..\..\..\src\hac\ContentInfo.cpp" />
 diff --git a/include/pietendo/hac/CompressedStorage.h b/include/pietendo/hac/CompressedStorage.h
 new file mode 100644
-index 0000000..b862443
+index 0000000000..b862443e24
 --- /dev/null
 +++ b/include/pietendo/hac/CompressedStorage.h
 @@ -0,0 +1,92 @@
@@ -118,7 +118,7 @@ index 0000000..b862443
 +}} // namespace pie::hac
 diff --git a/src/hac/CompressedStorage.cpp b/src/hac/CompressedStorage.cpp
 new file mode 100644
-index 0000000..1dd714d
+index 0000000000..1dd714ddde
 --- /dev/null
 +++ b/src/hac/CompressedStorage.cpp
 @@ -0,0 +1,494 @@
@@ -616,8 +616,59 @@ index 0000000..1dd714d
 +}
 +
 +}} // namespace pie::hac
+diff --git a/src/hac/GameCardFsSnapshotGenerator.cpp b/src/hac/GameCardFsSnapshotGenerator.cpp
+index 9d3a3145ea..ab43ee4aad 100644
+--- a/src/hac/GameCardFsSnapshotGenerator.cpp
++++ b/src/hac/GameCardFsSnapshotGenerator.cpp
+@@ -5,6 +5,7 @@
+ #include <tc/crypto/CryptoException.h>
+ 
+ #include <pietendo/hac/PartitionFsHeader.h>
++#include <pietendo/hac/define/pfs.h>
+ 
+ #include <fmt/core.h>
+ #include <tc/cli/FormatUtil.h>
+@@ -74,8 +75,25 @@ pie::hac::GameCardFsSnapshotGenerator::GameCardFsSnapshotGenerator(const std::sh
+ 		dir_info_tmp.name = dirItr->name;
+ 
+ 		// process the partition header
+-		// the `hash_protected_size` of the partitions is always the header size
+-		tc::ByteData part_header_raw = tc::ByteData(dirItr->hash_protected_size);
++		// `hash_protected_size` should hold the header size, but some images store 0 here
++		int64_t part_header_size = dirItr->hash_protected_size;
++		if (part_header_size <= 0 || part_header_size > dirItr->size)
++		{
++			if (dirItr->size < tc::io::IOUtil::castSizeToInt64(sizeof(pie::hac::sPfsHeader)))
++				throw tc::Exception("pie::hac::GameCardFsSnapshotGenerator", fmt::format("Partition \"{:s}\" is too small.", dirItr->name));
++
++			pie::hac::sPfsHeader part_hdr_probe;
++			stream->seek(dirItr->offset, tc::io::SeekOrigin::Begin);
++			stream->read((byte_t*)&part_hdr_probe, sizeof(pie::hac::sPfsHeader));
++
++			size_t probe_entry_size = part_hdr_probe.st_magic.unwrap() == pie::hac::pfs::kHashedPfsStructMagic ? sizeof(pie::hac::sHashedPfsFile) : sizeof(pie::hac::sPfsFile);
++			part_header_size = tc::io::IOUtil::castSizeToInt64(sizeof(pie::hac::sPfsHeader) + probe_entry_size * part_hdr_probe.file_num.unwrap() + part_hdr_probe.name_table_size.unwrap());
++		}
++
++		if (part_header_size <= 0 || part_header_size > dirItr->size)
++			throw tc::Exception("pie::hac::GameCardFsSnapshotGenerator", fmt::format("Partition \"{:s}\" header size is invalid.", dirItr->name));
++
++		tc::ByteData part_header_raw = tc::ByteData(tc::io::IOUtil::castInt64ToSize(part_header_size));
+ 		stream->seek(dirItr->offset, tc::io::SeekOrigin::Begin);
+ 		stream->read(part_header_raw.data(), part_header_raw.size());
+ 
+@@ -163,8 +181,8 @@ pie::hac::GameCardFsSnapshotGenerator::GameCardFsSnapshotGenerator(const std::sh
+ 		for (auto fileItr = dirItr->file_list.begin(); fileItr != dirItr->file_list.end(); fileItr++)
+ 		{
+ 			// if we verify the hashes, we import the hashable part first and verify
+-			if ((validate_mode == ValidationMode_Warn || validate_mode == ValidationMode_Throw))
+-			{	
++			if ((validate_mode == ValidationMode_Warn || validate_mode == ValidationMode_Throw) && fileItr->hashed_size > 0)
++			{
+ 				auto tmp_data = tc::ByteData(fileItr->hashed_size);
+ 				stream->seek(fileItr->offset, tc::io::SeekOrigin::Begin);
+ 				stream->read(tmp_data.data(), tmp_data.size());
 diff --git a/src/hac/HierarchicalIntegrityStream.cpp b/src/hac/HierarchicalIntegrityStream.cpp
-index 284a6a8..a28dfbb 100644
+index 284a6a8606..a28dfbb84c 100644
 --- a/src/hac/HierarchicalIntegrityStream.cpp
 +++ b/src/hac/HierarchicalIntegrityStream.cpp
 @@ -366,26 +366,33 @@ bool pie::hac::HierarchicalIntegrityStream::validateLayerBlocksWithHashLayer(con

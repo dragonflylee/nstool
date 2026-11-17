@@ -265,9 +265,27 @@ void nstool::GameCardProcess::processRootPfs()
 		fmt::print("[WARNING] GameCard Root HFS0: FAIL (bad hash)\n");
 	}
 
-	std::shared_ptr<tc::io::IStream> gc_fs_raw = std::make_shared<tc::io::SubStream>(tc::io::SubStream(mFile, mHdr.getPartitionFsAddress(), pie::hac::GameCardUtil::blockToAddr(mHdr.getValidDataEndPage()+1) - mHdr.getPartitionFsAddress()));
+	// valid_data_end_page may exceed the input stream length, clamp it to prevent SubStream overflow
+	int64_t file_len = mFile->length();
+	int64_t partition_fs_addr = tc::io::IOUtil::castSizeToInt64(mHdr.getPartitionFsAddress());
+	int64_t partition_fs_size = tc::io::IOUtil::castSizeToInt64(mHdr.getPartitionFsSize());
 
-	auto gc_vfs_snapshot = pie::hac::GameCardFsSnapshotGenerator(gc_fs_raw, mHdr.getPartitionFsSize(), mVerify ? pie::hac::GameCardFsSnapshotGenerator::ValidationMode_Warn : pie::hac::GameCardFsSnapshotGenerator::ValidationMode_None);
+	if (partition_fs_addr < 0 || partition_fs_addr >= file_len)
+		throw tc::Exception(mModuleName, "Corrupt GameCard Image: PartitionFs address is out of bounds.");
+	if (partition_fs_size <= 0 || partition_fs_size > file_len - partition_fs_addr)
+		throw tc::Exception(mModuleName, "Corrupt GameCard Image: PartitionFs size is out of bounds.");
+
+	int64_t gc_data_end = file_len;
+	if (mHdr.getValidDataEndPage() != (uint32_t)(-1))
+	{
+		int64_t declared_end = tc::io::IOUtil::castSizeToInt64(pie::hac::GameCardUtil::blockToAddr(mHdr.getValidDataEndPage() + 1));
+		if (declared_end > partition_fs_addr && declared_end < gc_data_end)
+			gc_data_end = declared_end;
+	}
+
+	std::shared_ptr<tc::io::IStream> gc_fs_raw = std::make_shared<tc::io::SubStream>(tc::io::SubStream(mFile, partition_fs_addr, gc_data_end - partition_fs_addr));
+
+	auto gc_vfs_snapshot = pie::hac::GameCardFsSnapshotGenerator(gc_fs_raw, tc::io::IOUtil::castInt64ToSize(partition_fs_size), mVerify ? pie::hac::GameCardFsSnapshotGenerator::ValidationMode_Warn : pie::hac::GameCardFsSnapshotGenerator::ValidationMode_None);
 	mFileSystem = std::make_shared<tc::io::VirtualFileSystem>(tc::io::VirtualFileSystem(gc_vfs_snapshot) );
 
 	mFsProcess.setInputFileSystem(mFileSystem);
